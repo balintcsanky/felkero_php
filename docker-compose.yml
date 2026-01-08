@@ -1,0 +1,55 @@
+services:
+  web:
+    image: nginx:alpine
+    ports: ["8080:80"]
+    volumes:
+      - ./:/var/www/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [php]
+
+  php:
+    build: .
+    volumes:
+      - ./:/var/www/html
+    working_dir: /var/www/html
+    environment:
+      DB_DSN: "mysql:host=db;dbname=portal;charset=utf8mb4"
+      DB_USER: "portal"
+      DB_PASS: "portal"
+      INVITE_PEPPER: "csereld_le_hosszu_randomra"
+      MAIL_HOST: "mailhog"
+      MAIL_PORT: "1025"
+      MAIL_FROM: "portal@ceg.hu"
+    depends_on:
+      - db
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+    ports:
+      - "8081:80"
+    depends_on:
+      - db
+
+
+  db:
+    image: mysql:8.4
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=portal
+      - MYSQL_USER=portal
+      - MYSQL_PASSWORD=portal
+    ports: ["3307:3306"]
+    volumes:
+      - dbdata:/var/lib/mysql
+
+
+  mailhog:
+    image: mailhog/mailhog
+    ports: ["8025:8025"]
+    expose: ["1025"]
+
+volumes:
+  dbdata: {}
