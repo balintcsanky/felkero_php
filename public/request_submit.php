@@ -3,8 +3,6 @@ require __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../src/SecurityHeaders.php';
 require __DIR__ . '/../src/Csrf.php';
 require __DIR__ . '/../src/Db.php';
-require __DIR__ . '/../src/Mailer.php';
-
 SecurityHeaders::applyNoIndex();
 Csrf::startSession();
 
@@ -29,6 +27,15 @@ if ($started > 0 && (time() - $started) < 3) {
   exit('Ez túl gyorsan történt!');
 }
 
+// Előellenőrzés (email + telefon) kötelező a beküldéshez
+$preverified = !empty($_SESSION['preverified']) && !empty($_SESSION['verified_email']) && !empty($_SESSION['verified_phone']);
+$preverifiedAt = (int)($_SESSION['preverified_at'] ?? 0);
+if (!$preverified || $preverifiedAt <= 0 || (time() - $preverifiedAt) > 1800) {
+  http_response_code(200);
+  header('Content-Type: text/plain; charset=utf-8');
+  exit('Kérjük, erősítsd meg az email címed és a telefonszámod a beküldés előtt.');
+}
+
 $email = trim((string)($_POST['email'] ?? ''));
 $orderRef = trim((string)($_POST['order_ref'] ?? ''));
 $category = trim((string)($_POST['category'] ?? ''));
@@ -36,26 +43,33 @@ $deviceCount = (int)($_POST['device_count'] ?? 0);
 
 $contactPhone = trim((string)($_POST['contact_phone'] ?? ''));
 
+// A kliens oldalon readonly, de szerver oldalon is ellenőrzünk
+$sessEmail = (string)($_SESSION['verified_email'] ?? '');
+$sessPhone = (string)($_SESSION['verified_phone'] ?? '');
+if ($sessEmail === '' || $sessPhone === '' || strcasecmp($email, $sessEmail) !== 0 || $contactPhone !== $sessPhone) {
+  http_response_code(200);
+  header('Content-Type: text/plain; charset=utf-8');
+  exit('Érvénytelen beküldés. Kérjük, indítsd újra az igénybejelentést.');
+}
+
 $pcCount = (int)($_POST['pc_count'] ?? 0);
 $phoneCount = (int)($_POST['phone_count'] ?? 0);
 $otherCount = (int)($_POST['other_count'] ?? 0);
 
 $otherNote = trim((string)($_POST['other_note'] ?? ''));
 
-
-
 $allowedCategories = ['A','B','C'];
 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-  http_response_code(200); exit('Ha az email helyes, küldtünk megerősítő linket.');
+  http_response_code(200); exit('Ha az adatok helyesek, igényed feldolgozás alá kerül.');
 }
 if ($orderRef === '' || mb_strlen($orderRef) > 100) {
-  http_response_code(200); exit('Ha az email helyes, küldtünk megerősítő linket.');
+  http_response_code(200); exit('Ha az adatok helyesek, igényed feldolgozás alá kerül.');
 }
 if (!in_array($category, $allowedCategories, true)) {
-  http_response_code(200); exit('Ha az email helyes, küldtünk megerősítő linket.');
+  http_response_code(200); exit('Ha az adatok helyesek, igényed feldolgozás alá kerül.');
 }
 if (($pcCount + $phoneCount + $otherCount) === 0) {
-  http_response_code(200); exit('Ha az adatok helyesek, küldtünk megerősítő linket.');
+  http_response_code(200); exit('Ha az adatok helyesek, igényed feldolgozás alá kerül.');
 }
 
 if (mb_strlen($otherNote) > 2000) {
@@ -71,39 +85,33 @@ $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255);
 
 $pdo->beginTransaction();
 try {
-$stmt = $pdo->prepare("
-  INSERT INTO requests (
-    email, contact_phone, order_ref, category,
-    pc_count, phone_count, other_count, other_note,
-    status, created_ip, user_agent, created_at, updated_at
-  ) VALUES (
-    ?, ?, ?, ?,
-    ?, ?, ?, ?,
-    'PENDING_EMAIL', ?, ?, ?, ?
-  )
-");
+  $stmt = $pdo->prepare("
+    INSERT INTO requests (
+      email, contact_phone, order_ref, category,
+      pc_count, phone_count, other_count, other_note,
+      status, email_verified_at, created_ip, user_agent, created_at, updated_at
+    ) VALUES (
+      ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      'PENDING_REVIEW', ?, ?, ?, ?, ?
+    )
+  ");
 
-$stmt->execute([
-  $email, $contactPhone, $orderRef, $category,
-  $pcCount, $phoneCount, $otherCount, $otherNote,
-  $ip, $ua, $now, $now
-]);
+  $stmt->execute([
+    $email, $contactPhone, $orderRef, $category,
+    $pcCount, $phoneCount, $otherCount, $otherNote,
+    $now, $ip, $ua, $now, $now
+  ]);
+
   $requestId = (int)$pdo->lastInsertId();
-
-  $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-  $pepper = getenv('INVITE_PEPPER') ?: '';
-  $tokenHash = hash('sha256', $token . $pepper);
-  $expiresAt = (new DateTimeImmutable('+60 minutes'))->format('Y-m-d H:i:s');
-
-  $stmt2 = $pdo->prepare("INSERT INTO request_verifications (request_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)");
-  $stmt2->execute([$requestId, $tokenHash, $expiresAt, $now]);
-
   $pdo->commit();
 
-  $appUrl = rtrim(getenv('APP_URL') ?: 'http://localhost:8080', '/');
-  $verifyUrl = $appUrl . "/request_verify.php?token=" . urlencode($token);
+  // Biztonság: pre-verified státusz egyszer használatos (opcionális)
+  unset($_SESSION['preverified'], $_SESSION['preverified_at'], $_SESSION['verified_email'], $_SESSION['verified_phone']);
 
-  Mailer::sendVerifyLink($email, $verifyUrl);
+  header('Content-Type: text/plain; charset=utf-8');
+  echo "Köszönjük! Az igénybejelentést rögzítettük.";
+  exit;
 
 } catch (Throwable $e) {
   $pdo->rollBack();

@@ -6,6 +6,17 @@ require __DIR__ . '/../src/Csrf.php';
 SecurityHeaders::applyNoIndex();
 Csrf::startSession();
 
+// Pre-verifikáció ellenőrzés (email + telefon)
+$preverified = !empty($_SESSION['preverified']) && !empty($_SESSION['verified_email']) && !empty($_SESSION['verified_phone']);
+$preverifiedAt = (int)($_SESSION['preverified_at'] ?? 0);
+if (!$preverified || $preverifiedAt <= 0 || (time() - $preverifiedAt) > 1800) {
+  header('Location: /verify_contact.php', true, 302);
+  exit;
+}
+
+$lockedEmail = (string)$_SESSION['verified_email'];
+$lockedPhone = (string)$_SESSION['verified_phone'];
+
 $_SESSION['form_started_at'] = time();
 
 $categories = ['A', 'B', 'C']; // TODO: valós kategóriák
@@ -29,15 +40,14 @@ $csrf = Csrf::token();
 
     <div>
       <label>Céges email</label><br>
-      <input type="email" name="email" required>
+      <input type="email" name="email" required readonly value="<?= htmlspecialchars($lockedEmail) ?>" style="background:#f2f2f2;">
     </div>
 
     <div>
       <label>Telefonszám</label><br>
-      <input type="tel" name="contact_phone" required maxlength="30"
-            placeholder="+36 30 123 4567">
+      <input type="tel" name="contact_phone" required readonly maxlength="30"
+            placeholder="+36 30 123 4567" value="<?= htmlspecialchars($lockedPhone) ?>" style="background:#f2f2f2;">
     </div>
-
 
     <div>
       <label>Megrendelés száma</label><br>
@@ -78,7 +88,6 @@ $csrf = Csrf::token();
       </div>
 
     </fieldset>
-
 
     <button type="submit">Beküldés</button>
   </form>
