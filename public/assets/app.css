@@ -347,6 +347,17 @@ body {
   cursor: not-allowed;
 }
 
+.phone{
+  display: grid;
+  grid-template-columns: 90px 90px 1fr;
+  gap: 10px;
+}
+.phone__cc{ text-align: center; }
+@media (max-width: 520px){
+  .phone{ grid-template-columns: 1fr; }
+}
+
+
 
 /* =========================================================
    Footer & helpers
@@ -371,7 +382,6 @@ body {
 a.link {
   color: rgba(255,255,255,0.85);
   text-decoration: none;
-  border-bottom: 1px dashed rgba(255,255,255,0.35);
 }
 
 a.link:hover {

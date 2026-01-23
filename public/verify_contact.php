@@ -7,6 +7,27 @@ require __DIR__ . '/../src/Mailer.php';
 SecurityHeaders::applyNoIndex();
 Csrf::startSession();
 
+if (isset($_GET['reset']) && $_GET['reset'] === '1') {
+  foreach ([
+    'pv_email','pv_email_otp_hash','pv_email_sent_at','pv_email_attempts','pv_email_ok','verified_email',
+    'pv_phone','pv_phone_otp_hash','pv_phone_sent_at','pv_phone_attempts','pv_phone_ok','verified_phone',
+    'pv_phone_prefix','pv_phone_number',
+    'preverified','preverified_at'
+  ] as $k) {
+    unset($_SESSION[$k]);
+  }
+
+  // Új session azonosító (session fixation ellen is jó)
+  session_regenerate_id(true);
+
+  // Új CSRF token generálás (mert a régi formok már úgyis érvénytelenek reset után)
+  unset($_SESSION['csrf']);
+
+  // Tiszta URL-lel térjünk vissza (ne maradjon reset=1)
+  header('Location: /verify_contact.php', true, 302);
+  exit;
+}
+
 $csrf = Csrf::token();
 
 const OTP_TTL_SECONDS = 600;         // 10 perc
@@ -128,14 +149,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       if (empty($_SESSION['pv_email_ok']) || empty($_SESSION['verified_email'])) {
         $err = 'Előbb ellenőrizd az email címedet.';
       } else {
-        $phone = normalize_phone((string)($_POST['contact_phone'] ?? ''));
-        if ($phone === '' || mb_strlen($phone) > 30) {
-          $err = 'Kérlek, adj meg egy érvényes telefonszámot.';
+        $phoneRaw = (string)($_POST['contact_phone'] ?? '');
+        $phone = normalize_phone($phoneRaw);
+
+        // Elvárt: +36 + (20|30|70) + 7 számjegy  => összesen +3610 számjegy? pontosan: +36 + 2 + 7 = 11 számjegy + plusz jel
+        if (!preg_match('/^\+36(20|30|70)\d{7}$/', $phone)) {
+          $err = 'Érvénytelen telefonszám. Csak magyar mobil: +36 20/30/70 és 123-1234 formátum.';
         } else {
-          // ha változik a telefon, reseteljük a telefon folyamatot
-          if (($phone !== (string)($_SESSION['pv_phone'] ?? '')) || ($phone !== (string)($_SESSION['verified_phone'] ?? ''))) {
-            reset_phone_flow();
-          }
+          // Ha jó, elmentjük a felbontott részeket is (hogy újratöltésnél visszatöltse)
+          $_SESSION['pv_phone'] = $phone;
+          $_SESSION['pv_phone_prefix'] = substr($phone, 3, 2);  // 20/30/70
+          $_SESSION['pv_phone_number'] = substr($phone, 5, 3) . '-' . substr($phone, 8, 4); // 123-1234
 
           $sentAt = (int)($_SESSION['pv_phone_sent_at'] ?? 0);
           if (!can_resend($sentAt)) {
@@ -338,10 +362,35 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
 
               <div class="field">
                 <label class="label">Céges Telefonszám</label>
-                <input class="input" type="tel" name="contact_phone" required maxlength="30"
-                       placeholder="+36 30 123 4567" value="<?= $pvPhone ?>"
-                       <?= $phoneOk ? 'readonly' : '' ?>>
+
+                <div class="phone">
+                  <input class="input phone__cc" type="text" value="+36" readonly aria-label="Országkód">
+
+                  <select class="input phone__prefix" name="hu_prefix" <?= $phoneOk ? 'disabled' : '' ?> required aria-label="Előhívó">
+                    <?php
+                      $selPrefix = (string)($_SESSION['pv_phone_prefix'] ?? '30');
+                      foreach (['20','30','70'] as $p) {
+                        $selected = ($selPrefix === $p) ? 'selected' : '';
+                        echo '<option value="'.htmlspecialchars($p, ENT_QUOTES, 'UTF-8').'" '.$selected.'>'.$p.'</option>';
+                      }
+                    ?>
+                  </select>
+
+                  <input class="input phone__num" type="text" name="hu_number" inputmode="numeric"
+                        pattern="^\d{3}-\d{4}$" maxlength="8"
+                        placeholder="123-1234"
+                        value="<?php
+                          $num = (string)($_SESSION['pv_phone_number'] ?? '');
+                          echo htmlspecialchars($num, ENT_QUOTES, 'UTF-8');
+                        ?>"
+                        <?= $phoneOk ? 'readonly' : '' ?> required aria-label="Telefonszám">
+                </div>
+
+                <!-- A teljes telefon (E.164) egy hidden mezőbe összeállítva kerül POST-ba -->
+                <input type="hidden" name="contact_phone" id="contact_phone_full"
+                      value="<?= htmlspecialchars((string)($_SESSION['pv_phone'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
               </div>
+
 
               <div class="actions">
                 <button class="btn btn--primary" type="submit" <?= $phoneOk ? 'disabled' : '' ?>>
@@ -395,5 +444,40 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
     </section>
   </main>
 </body>
+
+<script>
+(function(){
+  const prefix = document.querySelector('select[name="hu_prefix"]');
+  const num = document.querySelector('input[name="hu_number"]');
+  const full = document.getElementById('contact_phone_full');
+
+  if (!prefix || !num || !full) return;
+
+  function normalizeDigits(s){ return (s || '').replace(/\D/g, ''); }
+
+  function formatHuNumber(raw){
+    const d = normalizeDigits(raw).slice(0, 7);   // 7 számjegy
+    if (d.length <= 3) return d;
+    return d.slice(0,3) + '-' + d.slice(3);
+  }
+
+  function sync(){
+    // Formázás: 123-1234
+    const formatted = formatHuNumber(num.value);
+    if (num.value !== formatted) num.value = formatted;
+
+    const digits7 = normalizeDigits(formatted);
+    const p = (prefix.value || '30');
+
+    // Hidden contact_phone: +36 + előhívó + 7 számjegy (kötőjel nélkül)
+    full.value = '+36' + p + digits7;
+  }
+
+  num.addEventListener('input', sync);
+  prefix.addEventListener('change', sync);
+  sync();
+})();
+</script>
+
 
 </html>
