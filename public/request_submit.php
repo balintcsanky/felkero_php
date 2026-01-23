@@ -6,6 +6,12 @@ require __DIR__ . '/../src/Db.php';
 SecurityHeaders::applyNoIndex();
 Csrf::startSession();
 
+$requestKind = strtoupper(trim((string)($_POST['request_kind'] ?? 'DEVICES')));
+if (!in_array($requestKind, ['DEVICES','SEARCH'], true)) {
+  $requestKind = 'DEVICES';
+}
+
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   http_response_code(405); exit('Method Not Allowed');
 }
@@ -49,7 +55,7 @@ $sessPhone = (string)($_SESSION['verified_phone'] ?? '');
 if ($sessEmail === '' || $sessPhone === '' || strcasecmp($email, $sessEmail) !== 0 || $contactPhone !== $sessPhone) {
   http_response_code(200);
   header('Content-Type: text/plain; charset=utf-8');
-  exit('Érvénytelen beküldés. Kérjük, indítsd újra az igénybejelentést.');
+  exit('Érvénytelen beküldés.');
 }
 
 $pcCount = (int)($_POST['pc_count'] ?? 0);
@@ -110,8 +116,62 @@ try {
   unset($_SESSION['preverified'], $_SESSION['preverified_at'], $_SESSION['verified_email'], $_SESSION['verified_phone']);
 
   header('Content-Type: text/plain; charset=utf-8');
-  echo "Köszönjük! Az igénybejelentést rögzítettük.";
+  echo "Az igénybejelentést rögzítettük.";
   exit;
+
+$searchContactName  = trim((string)($_POST['search_contact_name'] ?? ''));
+$searchContactPhone = trim((string)($_POST['search_contact_phone'] ?? ''));
+$searchDate         = trim((string)($_POST['search_date'] ?? ''));
+$searchLocation     = trim((string)($_POST['search_location'] ?? ''));
+$searchNote         = trim((string)($_POST['search_note'] ?? ''));
+
+if ($requestKind === 'SEARCH') {
+
+  if ($searchContactName === '' || mb_strlen($searchContactName) > 120) {
+    http_response_code(200);
+    exit('Kapcsolattartó neve kötelező (max 120 karakter).');
+  }
+
+  if ($searchContactPhone === '' || mb_strlen($searchContactPhone) > 30) {
+    http_response_code(200);
+    exit('Kapcsolattartó telefonszáma kötelező (max 30 karakter).');
+  }
+
+  // yyyy-mm-dd validáció (szigorú)
+  if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $searchDate)) {
+    http_response_code(200);
+    exit('A kutatás időpontja formátuma: yyyy-mm-dd.');
+  }
+  $dt = DateTimeImmutable::createFromFormat('Y-m-d', $searchDate);
+  $errors = DateTimeImmutable::getLastErrors();
+  if (!$dt || ($errors['warning_count'] ?? 0) > 0 || ($errors['error_count'] ?? 0) > 0) {
+    http_response_code(200);
+    exit('Érvénytelen dátum.');
+  }
+
+  if ($searchLocation === '' || mb_strlen($searchLocation) > 200) {
+    http_response_code(200);
+    exit('A kutatás helyszíne kötelező (max 200 karakter).');
+  }
+
+  if (mb_strlen($searchNote) > 2000) {
+    http_response_code(200);
+    exit('Az egyéb megjegyzés túl hosszú (max 2000 karakter).');
+  }
+
+  // Normalizálás: eszköz darabszámok 0
+  $pcCount = 0; $phoneCount = 0; $otherCount = 0;
+
+  // A meglévő "other_note" mezőbe összefűzzük a SEARCH adatokat (ha most nem bővíted DB-t)
+  $otherNote =
+    "FELKÉRÉS HÁZKUTATÁSRA\n" .
+    "Kapcsolattartó: {$searchContactName}\n" .
+    "Kapcsolattartó telefon: {$searchContactPhone}\n" .
+    "Kutatás dátuma: {$searchDate}\n" .
+    "Helyszín: {$searchLocation}\n" .
+    "Megjegyzés: " . ($searchNote !== '' ? $searchNote : '-') . "\n";
+}
+
 
 } catch (Throwable $e) {
   $pdo->rollBack();

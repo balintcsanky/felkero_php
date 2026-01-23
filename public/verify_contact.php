@@ -254,7 +254,7 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
       <header class="card__header">
         <h1 class="title">Igénybejelentés</h1>
         <p class="subtitle">
-          Kétlépcsős ellenőrzés (Email → Telefon). Sikeres ellenőrzés után folytathatod az igény leadását.
+          Kétlépcsős ellenőrzés (Email és telefon). Ellenőrzés után lehet folytatni.
         </p>
 
         <div class="steps">
@@ -284,7 +284,7 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
         <div class="section">
           <p class="section__title">Email ellenőrzés</p>
 
-          <form method="post" action="/verify_contact.php" autocomplete="off">
+          <form method="post" action="/verify_contact.php" class="row" autocomplete="off">
             <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
             <input type="hidden" name="action" value="send_email">
 
@@ -293,7 +293,7 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
               <input class="input" type="email" name="email" required
                      value="<?= $pvEmail ?>"
                      <?= $emailOk ? 'readonly' : '' ?>
-                     placeholder="pelda@ceg.hu">
+                     placeholder="pelda@nvsz.hu">
             </div>
 
             <div class="actions">
@@ -332,7 +332,7 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
           <div class="section">
             <p class="section__title">Telefonszám ellenőrzés</p>
 
-            <form method="post" action="/verify_contact.php" autocomplete="off">
+            <form method="post" action="/verify_contact.php" class="row" autocomplete="off">
               <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
               <input type="hidden" name="action" value="send_phone">
 
@@ -349,13 +349,11 @@ $canContinue = !empty($_SESSION['preverified']) && $emailOk && $phoneOk;
                 </button>
               </div>
 
-              <div class="help">
-                Teszt környezetben a “telefon” kód emailben érkezik (SMS nincs bekötve).
-              </div>
+
             </form>
 
             <?php if ($phoneSent && !$phoneOk): ?>
-              <form method="post" action="/verify_contact.php" autocomplete="off">
+              <form method="post" action="/verify_contact.php" class="row" autocomplete="off">
                 <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf) ?>">
                 <input type="hidden" name="action" value="verify_phone">
 
