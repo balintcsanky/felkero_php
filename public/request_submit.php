@@ -137,6 +137,7 @@ if ($requestKind === 'SEARCH') {
     exit('Kapcsolattartó telefonszáma kötelező (max 30 karakter).');
   }
 
+  
   // yyyy-mm-dd validáció (szigorú)
   if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $searchDate)) {
     http_response_code(200);
